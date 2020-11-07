@@ -46,8 +46,8 @@ void multiply_power_of_X(const Ciphertext &encrypted, Ciphertext &destination,
     auto coeff_count = params.poly_modulus_degree();
     auto encrypted_count = encrypted.size();
 
-    //cout << "coeff mod count for power of X = " << coeff_mod_count << endl; 
-    //cout << "coeff count for power of X = " << coeff_count << endl; 
+    //cout << "coeff mod count for power of X = " << coeff_mod_count << endl;
+    //cout << "coeff count for power of X = " << coeff_count << endl;
 
     // First copy over.
     destination = encrypted;
@@ -69,163 +69,57 @@ vector<Ciphertext> expand_query(const Ciphertext &encrypted, uint32_t m, Encrypt
 
     // Assume that m is a power of 2. If not, round it to the next power of 2.
     uint32_t logm = ceil(log2(m));
-    Plaintext two("2");
 
     vector<int> galois_elts;
     auto n = params.poly_modulus_degree();
     if (logm > ceil(log2(n))){
-        throw logic_error("m > n is not allowed."); 
+        throw logic_error("m > n is not allowed.");
     }
     for (int i = 0; i < ceil(log2(n)); i++) {
         galois_elts.push_back((n + exponentiate_uint(2, i)) / exponentiate_uint(2, i));
     }
 
-    vector<Ciphertext> temp;
-    temp.push_back(encrypted);
+    vector<Ciphertext> result(1 << logm);
+    for (int i = 0; i < result.size(); i++){
+        result[i] = encrypted;
+    }
     Ciphertext tempctxt;
     Ciphertext tempctxt_rotated;
     Ciphertext tempctxt_shifted;
     Ciphertext tempctxt_rotatedshifted;
 
+    for (uint32_t i = 0; i < logm; i++) {
+        int num_ops =  1 << i;
 
-    for (uint32_t i = 0; i < logm - 1; i++) {
-        vector<Ciphertext> newtemp(temp.size() << 1);
-        // temp[a] = (j0 = a (mod 2**i) ? ) : Enc(x^{j0 - a}) else Enc(0).  With
-        // some scaling....
+
         int index_raw = (n << 1) - (1 << i);
         int index = (index_raw * galois_elts[i]) % (n << 1);
 
-        //cout << i << " " << logm - 1 << endl;
-        assert(temp.size() == pow(2, i));
-        for (uint32_t a = 0; a < temp.size(); a++) {
-
-            Plaintext res_decrypted1;
-            decryptor->decrypt(temp[a], res_decrypted1);
-            int size = (res_decrypted1).to_string().size();
-            if (size > 100)
-                size = 100;
-            cout << a << " (c0) to string: " << (res_decrypted1).to_string().substr(0,size) << endl;
-
-            cout << "galois elts: " << galois_elts[i] << endl;
-            evaluator->apply_galois(temp[a], galois_elts[i], galkey, tempctxt_rotated);
-
-            decryptor->decrypt(tempctxt_rotated, res_decrypted1);
-            size = (res_decrypted1).to_string().size();
-            if (size > 100)
-                size = 100;
-            cout << a << " (sub c0) to string: " << (res_decrypted1).to_string().substr(0,size) << endl;
-
-
-            // c0 + sub(c0, N/2^j + 1)
-            evaluator->add(temp[a], tempctxt_rotated, newtemp[a]);
-            //cout << i << " " << logm - 1 << " " << a << " multiply 1" << endl;
-
-            decryptor->decrypt(newtemp[a], res_decrypted1);
-            size = (res_decrypted1).to_string().size();
-            if (size > 100)
-                size = 100;
-            cout << a << " (c0 + sub) to string: " << (res_decrypted1).to_string().substr(0,size) << endl;
+        for (uint32_t a = 0; a < num_ops; a++) {
+            evaluator->apply_galois(result[a], galois_elts[i], galkey, tempctxt_rotated);
 
             // tempctxt_shifted, c1
             // c1 = c0*x^index_raw
-            multiply_power_of_X(temp[a], tempctxt_shifted, index_raw, params);
+            multiply_power_of_X(result[a], tempctxt_shifted, index_raw, params);
 
-            decryptor->decrypt(newtemp[a], res_decrypted1);
-            size = (res_decrypted1).to_string().size();
-            if (size > 100)
-                size = 100;
-            cout << a << " after mul new temp: " << (res_decrypted1).to_string().substr(0,size) << endl;
+            // c[k] = c[k] + sub(c[k], N/2^i + 1)
+            evaluator->add_inplace(result[a], tempctxt_rotated);
 
-            //evaluator->apply_galois(tempctxt_shifted, galois_elts[i], galkey, tempctxt_rotatedshifted);
+            evaluator->apply_galois(tempctxt_shifted, galois_elts[i], galkey, tempctxt_rotatedshifted);
             //cout << i << " " << logm - 1 << " " << a << " multiply 2" << endl;
 
             multiply_power_of_X(tempctxt_rotated, tempctxt_rotatedshifted, index, params);
 
-            decryptor->decrypt(newtemp[a], res_decrypted1);
-            size = (res_decrypted1).to_string().size();
-            if (size > 100)
-                size = 100;
-            cout << a << " after mul2 new temp: " << (res_decrypted1).to_string().substr(0,size) << endl;
-
-            // Enc(2^i x^j) if j = 0 (mod 2**i).
-            evaluator->add(tempctxt_shifted, tempctxt_rotatedshifted, newtemp[a + temp.size()]);
-            
-            decryptor->decrypt(newtemp[a], res_decrypted1);
-            size = (res_decrypted1).to_string().size();
-            if (size > 100)
-                size = 100;
-            cout << a << " after add new temp: " << (res_decrypted1).to_string().substr(0,size) << endl;
-
-        }
-        temp = newtemp;
-
-        // decrypt to see the contents
-        for (int j = 0; j < temp.size(); j++) {
-            Plaintext res_decrypted1;
-            decryptor->decrypt(temp[j], res_decrypted1);
-            int size = (res_decrypted1).to_string().size();
-            if (size > 100)
-                size = 100;
-            cout << j << " (temp) to string: " << (res_decrypted1).to_string().substr(0,size) << endl;
+            // c[k + 2^i] = c'[k] + sub(c'[k], N/2^i+1)
+            evaluator->add(tempctxt_shifted, tempctxt_rotatedshifted, result[a + num_ops]);
         }
     }
-    // Last step of the loop
-    vector<Ciphertext> newtemp(temp.size() << 1);
-    int index_raw = (n << 1) - (1 << (logm - 1));
-    int index = (index_raw * galois_elts[logm - 1]) % (n << 1);
-    for (uint32_t a = 0; a < temp.size(); a++) {
-        if (a >= (m - (1 << (logm - 1)))) {                       // corner case.
-            evaluator->multiply_plain(temp[a], two, newtemp[a]); // plain multiplication by 2.
-        }
-        else {
-            Plaintext res_decrypted1;
-            decryptor->decrypt(temp[a], res_decrypted1);
-            int size = (res_decrypted1).to_string().size();
-            if (size > 100)
-                size = 100;
-            cout << a << " (c0) to string: " << (res_decrypted1).to_string().substr(0,size) << endl;
-
-            evaluator->apply_galois(temp[a], galois_elts[logm - 1], galkey, tempctxt_rotated);
-
-            decryptor->decrypt(tempctxt_rotated, res_decrypted1);
-            size = (res_decrypted1).to_string().size();
-            if (size > 100)
-                size = 100;
-            cout << a << " (sub c0) to string: " << (res_decrypted1).to_string().substr(0,size) << endl;        
-    
-            evaluator->add(temp[a], tempctxt_rotated, newtemp[a]);
-
-            decryptor->decrypt(newtemp[a], res_decrypted1);
-            size = (res_decrypted1).to_string().size();
-            if (size > 100)
-                size = 100;
-            cout << a << " (c0 + sub) to string: " << (res_decrypted1).to_string().substr(0,size) << endl;
-
-            //cout << " " << logm - 1 << " " << a << " multiply 1" << endl;
-            multiply_power_of_X(temp[a], tempctxt_shifted, index_raw, params);
-            //cout << " " << logm - 1 << " " << a << " multiply 2" << endl;
-            //evaluator->apply_galois(tempctxt_shifted, galois_elts[logm - 1], galkey, tempctxt_rotatedshifted);
-            multiply_power_of_X(tempctxt_rotated, tempctxt_rotatedshifted, index, params);
-            evaluator->add(tempctxt_shifted, tempctxt_rotatedshifted, newtemp[a + temp.size()]);
-        }
-    }
-
-    // decrypt to see the contents
-    for (int i = 0; i < newtemp.size(); i++) {
-        Plaintext res_decrypted1;
-        decryptor->decrypt(newtemp[i], res_decrypted1);
-        int size = (res_decrypted1).to_string().size();
-        if (size > 100) size = 100;
-        cout << i << " (temp) to string: "
-             << (res_decrypted1).to_string().substr(0, size) << endl;
-    }
-
-    vector<Ciphertext>::const_iterator first = newtemp.begin();
-    vector<Ciphertext>::const_iterator last = newtemp.begin() + m;
-    assert(newtemp.size() == m);
+    vector<Ciphertext>::const_iterator first = result.begin();
+    vector<Ciphertext>::const_iterator last = result.begin() + m;
     vector<Ciphertext> newVec(first, last);
     return newVec;
 }
+
 
 bool uniTest(vector<uint32_t>& galois_elts, GaloisKeys& gal_keys, int N, EncryptionParameters& parms, IntegerEncoder& encoder) {
     Ciphertext one;
@@ -303,7 +197,7 @@ int main(int argc, char *argv[]) {
     srand(time(0));
     auto coeff_mod_count = parms.coeff_modulus().size();
     cout << coeff_mod_count << endl;
-    
+
     cout << parms.coeff_modulus()[0].value() << endl;
 
     for (int j = 0; j < 2; j++) {
@@ -313,7 +207,7 @@ int main(int argc, char *argv[]) {
         encryptor->encrypt(plain_val, encrypted);
 
         vector<Ciphertext> expanded_vec = expand_query(encrypted, 4, parms, gal_keys);
-        
+
         for (int i = 0; i < expanded_vec.size(); i++) {
             Plaintext res_decrypted1;
             decryptor->decrypt(expanded_vec[i], res_decrypted1);
