@@ -105,7 +105,7 @@ vector<Ciphertext> expand_query(const Ciphertext &encrypted, uint32_t m, Encrypt
             // c[k] = c[k] + sub(c[k], N/2^i + 1)
             evaluator->add_inplace(result[a], tempctxt_rotated);
 
-            evaluator->apply_galois(tempctxt_shifted, galois_elts[i], galkey, tempctxt_rotatedshifted);
+            //evaluator->apply_galois(tempctxt_shifted, galois_elts[i], galkey, tempctxt_rotatedshifted);
             //cout << i << " " << logm - 1 << " " << a << " multiply 2" << endl;
 
             multiply_power_of_X(tempctxt_rotated, tempctxt_rotatedshifted, index, params);
